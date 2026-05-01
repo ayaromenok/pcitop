@@ -281,6 +281,7 @@ void start_logging(void) {
     time_t now_time = time(NULL);
     struct tm *t = localtime(&now_time);
     strftime(session_ts, sizeof(session_ts), "%Y%m%d%H%M%S", t);
+    mark_log_start();
     logging_enabled = true;
 }
 

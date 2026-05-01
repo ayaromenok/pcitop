@@ -15,6 +15,8 @@ typedef struct {
     double acc_tx_mb;
     double gui_base_rx;
     double gui_base_tx;
+    double log_start_rx;
+    double log_start_tx;
 } DeviceStats;
 
 #define MAX_STATS 1024
@@ -40,6 +42,8 @@ static DeviceStats* get_or_create_stats(const char *dbdf) {
         global_stats[num_stats].acc_tx_mb = 0;
         global_stats[num_stats].gui_base_rx = 0;
         global_stats[num_stats].gui_base_tx = 0;
+        global_stats[num_stats].log_start_rx = 0;
+        global_stats[num_stats].log_start_tx = 0;
         return &global_stats[num_stats++];
     }
     return NULL;
@@ -49,6 +53,13 @@ void mark_gui_cycle(void) {
     for (int i = 0; i < num_stats; i++) {
         global_stats[i].gui_base_rx = global_stats[i].acc_rx_mb;
         global_stats[i].gui_base_tx = global_stats[i].acc_tx_mb;
+    }
+}
+
+void mark_log_start(void) {
+    for (int i = 0; i < num_stats; i++) {
+        global_stats[i].log_start_rx = global_stats[i].acc_rx_mb;
+        global_stats[i].log_start_tx = global_stats[i].acc_tx_mb;
     }
 }
 
@@ -323,7 +334,10 @@ void finalize_logs(PciNode *all_nodes, int total_devices, const char *session_ts
         // Open in r+ to update the first line
         FILE *f = fopen(filename, "r+");
         if (f) {
-            fprintf(f, "FINAL SumRX: %15.2f MB, SumTX: %15.2f MB [FINALIZED] ", node->total_rx, node->total_tx);
+            DeviceStats *s = get_or_create_stats(node->dbdf_str);
+            double session_rx = node->total_rx - (s ? s->log_start_rx : 0);
+            double session_tx = node->total_tx - (s ? s->log_start_tx : 0);
+            fprintf(f, "FINAL SumRX: %15.2f MB, SumTX: %15.2f MB [FINALIZED] ", session_rx, session_tx);
             fclose(f);
         }
     }
