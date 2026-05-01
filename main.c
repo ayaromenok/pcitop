@@ -12,8 +12,10 @@ char hidden_dbdfs[MAX_HIDDEN_DEVICES][32];
 int num_hidden = 0;
 bool show_hidden_mode = false;
 int selected_line = 0;
+int num_lines = 0;
 int refresh_ms = 1000;
 int throughput_ms = 100;
+FILE *log_file = NULL;
 
 static long long get_time_ms(void) {
     struct timeval tv;
@@ -121,7 +123,6 @@ typedef struct {
 } RenderLine;
 
 RenderLine *render_lines = NULL;
-int num_lines = 0;
 int max_lines = 0;
 
 static int get_gen_num(float speed) {
@@ -258,8 +259,8 @@ void render_screen(int scroll_y) {
     }
 
     // Status bar
-    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  GUI: %dms  +/-:Tput (%dms)  q:quit", 
-             refresh_ms, throughput_ms);
+    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  l:log [%s]  GUI:%dms  +/-:Tput(%dms)  q:quit", 
+             log_file ? "ACTIVE" : "OFF", refresh_ms, throughput_ms);
 
     char version_str[64];
     snprintf(version_str, sizeof(version_str), "pcitop build: %s version: %s", GIT_BUILD, GIT_VERSION);
@@ -273,22 +274,6 @@ void render_screen(int scroll_y) {
 
 int main(void) {
     load_settings();
-
-    // Initialize logging
-    char hostname[128];
-    if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
-    time_t start_time = time(NULL);
-    struct tm *t = localtime(&start_time);
-    char log_filename[256];
-    strftime(log_filename, sizeof(log_filename), "%Y%m%d%H%M%S", t);
-    char full_log_path[512];
-    snprintf(full_log_path, sizeof(full_log_path), "%s_%s.log", hostname, log_filename);
-    
-    FILE *log_file = fopen(full_log_path, "w");
-    if (log_file) {
-        fprintf(log_file, "PCIe Throughput Log for %s starting at %s", hostname, asctime(t));
-        fprintf(log_file, "Format: Timestamp | Global Sum RX, TX | [DBDF: RX, TX, ...]\n\n");
-    }
 
     initscr();
     start_color();
@@ -309,6 +294,7 @@ int main(void) {
     PciNode **roots = NULL;
     int num_roots = 0;
     int total_devices = 0;
+    FILE *log_file = NULL;
     
     while (1) {
         long long now = get_time_ms();
@@ -394,6 +380,26 @@ int main(void) {
                 last_gui_update = 0;
             } else if (ch == 'r') {
                 reset_throughput();
+                force_gui_render = true;
+            } else if (ch == 'l') {
+                if (log_file) {
+                    fclose(log_file);
+                    log_file = NULL;
+                } else {
+                    char hostname[128];
+                    if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
+                    time_t now_time = time(NULL);
+                    struct tm *t = localtime(&now_time);
+                    char log_filename[256];
+                    strftime(log_filename, sizeof(log_filename), "%Y%m%d%H%M%S", t);
+                    char full_log_path[512];
+                    snprintf(full_log_path, sizeof(full_log_path), "%s_%s.log", hostname, log_filename);
+                    log_file = fopen(full_log_path, "w");
+                    if (log_file) {
+                        fprintf(log_file, "PCIe Throughput Log for %s starting at %s", hostname, asctime(t));
+                        fprintf(log_file, "Format: Timestamp | Global Sum RX, TX | [DBDF: RX, TX, ...]\n\n");
+                    }
+                }
                 force_gui_render = true;
             } else if (ch == '+' || ch == '=') {
                 if (throughput_ms < 5000) {
