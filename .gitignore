@@ -2,4 +2,5 @@ build/
 *.o
 pcitop
 test_pci
+test_pci.c
 *.ini
