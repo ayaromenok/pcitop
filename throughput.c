@@ -316,6 +316,8 @@ void write_log_entry(PciNode *all_nodes, int total_devices, const char *session_
 }
 
 void finalize_logs(PciNode *all_nodes, int total_devices, const char *session_ts) {
+    if (!session_ts || session_ts[0] == '\0') return;
+
     char hostname[128];
     if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
 
@@ -330,6 +332,9 @@ void finalize_logs(PciNode *all_nodes, int total_devices, const char *session_ts
 
         char filename[512];
         snprintf(filename, sizeof(filename), "logs/%s_%s_%s.log", hostname, dev_name_san, session_ts);
+
+        // ONLY finalize if the file was actually created/used during the session
+        if (access(filename, F_OK) != 0) continue;
 
         // Append final totals to the end of the file
         FILE *f = fopen(filename, "a");
