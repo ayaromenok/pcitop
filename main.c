@@ -284,8 +284,10 @@ void start_logging(void) {
     logging_enabled = true;
 }
 
-void stop_logging(void) {
-    // Files are opened/closed per-device now, but we set enabled to false
+void stop_logging(PciNode *all_nodes, int total_devices) {
+    if (logging_enabled && all_nodes) {
+        finalize_logs(all_nodes, total_devices, session_ts);
+    }
     logging_enabled = false;
 }
 
@@ -401,7 +403,7 @@ int main(void) {
             } else if (ch == 'l') {
                 logging_enabled = !logging_enabled;
                 if (logging_enabled) start_logging();
-                else stop_logging();
+                else stop_logging(all_nodes, total_devices);
                 save_settings();
                 force_gui_render = true;
             } else if (ch == '+' || ch == '=') {
@@ -420,11 +422,13 @@ int main(void) {
         }
     }
     
+    if (logging_enabled) {
+        finalize_logs(all_nodes, total_devices, session_ts);
+    }
     if (pacc) {
         free_pci_tree(roots, all_nodes);
         cleanup_pci_access(pacc);
     }
-    if (log_file) fclose(log_file);
     endwin();
     if (render_lines) free(render_lines);
     

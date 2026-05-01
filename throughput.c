@@ -295,12 +295,36 @@ void write_log_entry(PciNode *all_nodes, int total_devices, const char *session_
             FILE *f = fopen(filename, "a");
             if (f) {
                 if (is_new) {
-                    fprintf(f, "SumRX: %.2f MB, SumTX: %.2f MB\n", node->total_rx, node->total_tx);
+                    // Reserve 80 bytes for the finalized sum line
+                    fprintf(f, "FINAL SumRX: %15s MB, SumTX: %15s MB [PENDING]   \n", " ", " ");
                     fprintf(f, "Format: Timestamp, RX_MB, TX_MB\n");
                 }
                 fprintf(f, "%s, %.2f, %.2f\n", ts, node->interval_rx, node->interval_tx);
                 fclose(f);
             }
+        }
+    }
+}
+
+void finalize_logs(PciNode *all_nodes, int total_devices, const char *session_ts) {
+    char hostname[128];
+    if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
+
+    for (int i = 0; i < total_devices; i++) {
+        PciNode *node = &all_nodes[i];
+        char dev_name_san[128];
+        strncpy(dev_name_san, node->device_str, sizeof(dev_name_san) - 1);
+        dev_name_san[sizeof(dev_name_san)-1] = '\0';
+        sanitize_filename(dev_name_san);
+
+        char filename[512];
+        snprintf(filename, sizeof(filename), "logs/%s_%s_%s.log", hostname, dev_name_san, session_ts);
+
+        // Open in r+ to update the first line
+        FILE *f = fopen(filename, "r+");
+        if (f) {
+            fprintf(f, "FINAL SumRX: %15.2f MB, SumTX: %15.2f MB [FINALIZED] ", node->total_rx, node->total_tx);
+            fclose(f);
         }
     }
 }

@@ -62,5 +62,6 @@ void update_throughput(PciNode *all_nodes, int total_devices);
 void reset_throughput(void);
 void mark_gui_cycle(void);
 void write_log_entry(PciNode *all_nodes, int total_devices, const char *session_ts);
+void finalize_logs(PciNode *all_nodes, int total_devices, const char *session_ts);
 
 #endif // PCITOP_H
