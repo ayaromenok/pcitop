@@ -56,6 +56,8 @@ void load_settings(void);
 void save_settings(void);
 bool is_hidden(const char *dbdf);
 void toggle_hidden(const char *dbdf);
+bool is_logging_device(const char *dbdf);
+void toggle_logging_device(const char *dbdf);
 
 // Throughput management
 void update_throughput(PciNode *all_nodes, int total_devices);

@@ -293,7 +293,7 @@ void write_log_entry(PciNode *all_nodes, int total_devices, const char *session_
 
     for (int i = 0; i < total_devices; i++) {
         PciNode *node = &all_nodes[i];
-        if (!node->hidden && (node->interval_rx > 0 || node->interval_tx > 0)) {
+        if (!node->hidden && is_logging_device(node->dbdf_str) && (node->interval_rx > 0 || node->interval_tx > 0)) {
             char dev_name_san[128];
             strncpy(dev_name_san, node->device_str, sizeof(dev_name_san) - 1);
             dev_name_san[sizeof(dev_name_san)-1] = '\0';
@@ -323,6 +323,8 @@ void finalize_logs(PciNode *all_nodes, int total_devices, const char *session_ts
 
     for (int i = 0; i < total_devices; i++) {
         PciNode *node = &all_nodes[i];
+        if (!is_logging_device(node->dbdf_str)) continue;
+        
         char dev_name_san[128];
         strncpy(dev_name_san, node->device_str, sizeof(dev_name_san) - 1);
         dev_name_san[sizeof(dev_name_san)-1] = '\0';

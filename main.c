@@ -15,7 +15,9 @@ int selected_line = 0;
 int num_lines = 0;
 int refresh_ms = 1000;
 int throughput_ms = 100;
-bool logging_enabled = false;
+bool global_logging_enabled = false;
+char logging_dbdfs[MAX_HIDDEN_DEVICES][32];
+int num_logging_devices = 0;
 FILE *log_file = NULL;
 char session_ts[32] = "";
 
@@ -31,6 +33,7 @@ void load_settings(void) {
     char line[64];
     bool in_hidden_section = false;
     bool in_general_section = false;
+    bool in_logging_section = false;
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = 0;
         if (strcmp(line, "[hidden]") == 0) {
@@ -43,9 +46,16 @@ void load_settings(void) {
             in_hidden_section = false;
             continue;
         }
+        if (strcmp(line, "[logging]") == 0) {
+            in_logging_section = true;
+            in_hidden_section = false;
+            in_general_section = false;
+            continue;
+        }
         if (line[0] == '[') {
             in_hidden_section = false;
             in_general_section = false;
+            in_logging_section = false;
             continue;
         }
         if (in_hidden_section && line[0] != '\0') {
@@ -61,7 +71,14 @@ void load_settings(void) {
                 if (throughput_ms < 1) throughput_ms = 1;
                 if (throughput_ms > 5000) throughput_ms = 5000;
             } else if (strncmp(line, "logging_enabled=", 16) == 0) {
-                logging_enabled = (atoi(line + 16) == 1);
+                global_logging_enabled = (atoi(line + 16) == 1);
+            }
+        }
+        if (in_logging_section && line[0] != '\0') {
+            char *eq = strchr(line, '=');
+            if (eq) *eq = '\0';
+            if (num_logging_devices < MAX_HIDDEN_DEVICES) {
+                strncpy(logging_dbdfs[num_logging_devices++], line, 31);
             }
         }
     }
@@ -73,10 +90,14 @@ void save_settings(void) {
     if (!f) return;
     fprintf(f, "[general]\n");
     fprintf(f, "throughput_ms=%d\n", throughput_ms);
-    fprintf(f, "logging_enabled=%d\n", logging_enabled ? 1 : 0);
+    fprintf(f, "logging_enabled=%d\n", global_logging_enabled ? 1 : 0);
     fprintf(f, "\n[hidden]\n");
     for (int i = 0; i < num_hidden; i++) {
         fprintf(f, "%s=1\n", hidden_dbdfs[i]);
+    }
+    fprintf(f, "\n[logging]\n");
+    for (int i = 0; i < num_logging_devices; i++) {
+        fprintf(f, "%s=1\n", logging_dbdfs[i]);
     }
     fclose(f);
 }
@@ -106,6 +127,34 @@ void toggle_hidden(const char *dbdf) {
         // Add
         if (num_hidden < MAX_HIDDEN_DEVICES) {
             strncpy(hidden_dbdfs[num_hidden++], dbdf, 31);
+        }
+    }
+    save_settings();
+}
+
+bool is_logging_device(const char *dbdf) {
+    for (int i = 0; i < num_logging_devices; i++) {
+        if (strcmp(logging_dbdfs[i], dbdf) == 0) return true;
+    }
+    return false;
+}
+
+void toggle_logging_device(const char *dbdf) {
+    int found_idx = -1;
+    for (int i = 0; i < num_logging_devices; i++) {
+        if (strcmp(logging_dbdfs[i], dbdf) == 0) {
+            found_idx = i;
+            break;
+        }
+    }
+    if (found_idx != -1) {
+        for (int i = found_idx; i < num_logging_devices - 1; i++) {
+            strcpy(logging_dbdfs[i], logging_dbdfs[i+1]);
+        }
+        num_logging_devices--;
+    } else {
+        if (num_logging_devices < MAX_HIDDEN_DEVICES) {
+            strncpy(logging_dbdfs[num_logging_devices++], dbdf, 31);
         }
     }
     save_settings();
@@ -228,7 +277,7 @@ void render_screen(int scroll_y) {
     erase();
     
     attron(A_REVERSE);
-    mvprintw(0, 0, "%-16s %-10s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s", 
+    mvprintw(0, 0, "%-16s %-15s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s", 
              "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed", "RX (Interval)", "TX (Interval)", "Sum RX", "Sum TX");
     attroff(A_REVERSE);
     
@@ -251,8 +300,15 @@ void render_screen(int scroll_y) {
         strncpy(device_trunc, l->device_str, 25);
         device_trunc[25] = '\0';
         
-        mvprintw(i + 1, 0, "%-16s %-10s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s",
-                 l->tree_str, l->bdf_str, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str, 
+        char bdf_display[32];
+        if (is_logging_device(l->dbdf_str)) {
+            snprintf(bdf_display, sizeof(bdf_display), "%s (L)", l->bdf_str);
+        } else {
+            strncpy(bdf_display, l->bdf_str, sizeof(bdf_display) - 1);
+        }
+
+        mvprintw(i + 1, 0, "%-16s %-15s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s",
+                 l->tree_str, bdf_display, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str, 
                  l->rx_rate_str, l->tx_rate_str, l->total_rx_str, l->total_tx_str);
         
         if (l->is_hidden_node) {
@@ -264,8 +320,8 @@ void render_screen(int scroll_y) {
     }
 
     // Status bar
-    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  l:log [%s]  GUI:%dms  +/-:Tput(%dms)  q:quit", 
-             logging_enabled ? "ACTIVE" : "OFF", refresh_ms, throughput_ms);
+    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  l:select  L:log [%s]  GUI:%dms  +/-:Tput(%dms)  q:quit", 
+             global_logging_enabled ? "ACTIVE" : "OFF", refresh_ms, throughput_ms);
 
     char version_str[64];
     snprintf(version_str, sizeof(version_str), "pcitop build: %s version: %s", GIT_BUILD, GIT_VERSION);
@@ -282,19 +338,19 @@ void start_logging(void) {
     struct tm *t = localtime(&now_time);
     strftime(session_ts, sizeof(session_ts), "%Y%m%d%H%M%S", t);
     mark_log_start();
-    logging_enabled = true;
+    global_logging_enabled = true;
 }
 
 void stop_logging(PciNode *all_nodes, int total_devices) {
-    if (logging_enabled && all_nodes) {
+    if (global_logging_enabled && all_nodes) {
         finalize_logs(all_nodes, total_devices, session_ts);
     }
-    logging_enabled = false;
+    global_logging_enabled = false;
 }
 
 int main(void) {
     load_settings();
-    if (logging_enabled) start_logging();
+    if (global_logging_enabled) start_logging();
 
     initscr();
     start_color();
@@ -335,7 +391,7 @@ int main(void) {
             update_throughput(all_nodes, total_devices);
             
             // Log entries
-            if (logging_enabled) {
+            if (global_logging_enabled) {
                 write_log_entry(all_nodes, total_devices, session_ts);
             }
 
@@ -402,8 +458,13 @@ int main(void) {
                 reset_throughput();
                 force_gui_render = true;
             } else if (ch == 'l') {
-                logging_enabled = !logging_enabled;
-                if (logging_enabled) start_logging();
+                if (num_lines > 0) {
+                    toggle_logging_device(render_lines[selected_line].dbdf_str);
+                }
+                force_gui_render = true;
+            } else if (ch == 'L') {
+                global_logging_enabled = !global_logging_enabled;
+                if (global_logging_enabled) start_logging();
                 else stop_logging(all_nodes, total_devices);
                 save_settings();
                 force_gui_render = true;
@@ -423,7 +484,7 @@ int main(void) {
         }
     }
     
-    if (logging_enabled) {
+    if (global_logging_enabled) {
         finalize_logs(all_nodes, total_devices, session_ts);
     }
     if (pacc) {
