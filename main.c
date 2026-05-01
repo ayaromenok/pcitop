@@ -354,7 +354,7 @@ int main(void) {
                 selected_line -= (max_y - 2);
                 if (selected_line < 0) selected_line = 0;
                 force_gui_render = true;
-            } else if (ch == 'h') {
+            } else if (ch == 'h' || ch == ' ') {
                 if (num_lines > 0) {
                     toggle_hidden(render_lines[selected_line].dbdf_str);
                     // Tree structure changed, force a full rebuild cycle
