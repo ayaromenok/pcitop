@@ -256,3 +256,33 @@ void update_throughput(PciNode *all_nodes, int total_devices) {
     update_net_throughput(all_nodes, total_devices);
     update_nvme_throughput(all_nodes, total_devices);
 }
+
+void write_log_entry(FILE *f, PciNode *all_nodes, int total_devices) {
+    if (!f) return;
+
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char ts[32];
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
+
+    float sum_rx = 0, sum_tx = 0;
+    for (int i = 0; i < total_devices; i++) {
+        if (!all_nodes[i].hidden) {
+            sum_rx += all_nodes[i].interval_rx;
+            sum_tx += all_nodes[i].interval_tx;
+        }
+    }
+
+    fprintf(f, "%s | SumRX: %.2f MB, SumTX: %.2f MB | ", ts, sum_rx, sum_tx);
+    
+    bool first = true;
+    for (int i = 0; i < total_devices; i++) {
+        if (!all_nodes[i].hidden && (all_nodes[i].interval_rx > 0 || all_nodes[i].interval_tx > 0)) {
+            if (!first) fprintf(f, ", ");
+            fprintf(f, "%s: RX %.2f MB, TX %.2f MB", all_nodes[i].dbdf_str, all_nodes[i].interval_rx, all_nodes[i].interval_tx);
+            first = false;
+        }
+    }
+    fprintf(f, "\n");
+    fflush(f);
+}

@@ -268,8 +268,28 @@ void render_screen(int scroll_y) {
     refresh();
 }
 
+#include <unistd.h>
+#include <time.h>
+
 int main(void) {
     load_settings();
+
+    // Initialize logging
+    char hostname[128];
+    if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
+    time_t start_time = time(NULL);
+    struct tm *t = localtime(&start_time);
+    char log_filename[256];
+    strftime(log_filename, sizeof(log_filename), "%Y%m%d%H%M%S", t);
+    char full_log_path[512];
+    snprintf(full_log_path, sizeof(full_log_path), "%s_%s.log", hostname, log_filename);
+    
+    FILE *log_file = fopen(full_log_path, "w");
+    if (log_file) {
+        fprintf(log_file, "PCIe Throughput Log for %s starting at %s", hostname, asctime(t));
+        fprintf(log_file, "Format: Timestamp | Global Sum RX, TX | [DBDF: RX, TX, ...]\n\n");
+    }
+
     initscr();
     start_color();
     init_pair(1, COLOR_YELLOW, COLOR_BLUE); // Highlight pair
@@ -308,6 +328,11 @@ int main(void) {
             // Gather final throughput for this cycle
             update_throughput(all_nodes, total_devices);
             
+            // Log entry
+            if (log_file) {
+                write_log_entry(log_file, all_nodes, total_devices);
+            }
+
             build_render_list(roots, num_roots);
             
             getmaxyx(stdscr, max_y, max_x);
@@ -390,6 +415,7 @@ int main(void) {
         free_pci_tree(roots, all_nodes);
         cleanup_pci_access(pacc);
     }
+    if (log_file) fclose(log_file);
     endwin();
     if (render_lines) free(render_lines);
     

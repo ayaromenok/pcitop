@@ -1,6 +1,7 @@
 #ifndef PCITOP_H
 #define PCITOP_H
 
+#include <stdio.h>
 #include <pci/pci.h>
 #include <stdbool.h>
 
@@ -60,5 +61,6 @@ void toggle_hidden(const char *dbdf);
 void update_throughput(PciNode *all_nodes, int total_devices);
 void reset_throughput(void);
 void mark_gui_cycle(void);
+void write_log_entry(FILE *f, PciNode *all_nodes, int total_devices);
 
 #endif // PCITOP_H
