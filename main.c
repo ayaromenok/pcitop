@@ -86,6 +86,8 @@ typedef struct {
     char device_str[128];
     char max_spd_str[32];
     char cur_spd_str[32];
+    char rx_rate_str[16];
+    char tx_rate_str[16];
     bool is_hidden_node;
     char dbdf_str[32];
 } RenderLine;
@@ -104,6 +106,18 @@ static int get_gen_num(float speed) {
     return 0;
 }
 
+static void format_rate(float rate_mb, char *buf, size_t size) {
+    if (rate_mb == 0.0f) {
+        strcpy(buf, "-");
+    } else if (rate_mb < 1.0f) {
+        snprintf(buf, size, "%.1f KB/s", rate_mb * 1024.0f);
+    } else if (rate_mb < 1024.0f) {
+        snprintf(buf, size, "%.1f MB/s", rate_mb);
+    } else {
+        snprintf(buf, size, "%.1f GB/s", rate_mb / 1024.0f);
+    }
+}
+
 void add_render_line(const char *tree, PciNode *node) {
     if (num_lines >= max_lines) {
         max_lines = max_lines == 0 ? 128 : max_lines * 2;
@@ -116,6 +130,9 @@ void add_render_line(const char *tree, PciNode *node) {
     strncpy(line->dbdf_str, node->dbdf_str, sizeof(line->dbdf_str) - 1);
     line->is_hidden_node = node->hidden;
     
+    format_rate(node->rx_rate, line->rx_rate_str, sizeof(line->rx_rate_str));
+    format_rate(node->tx_rate, line->tx_rate_str, sizeof(line->tx_rate_str));
+
     // Vendor might be shortened
     strncpy(line->vendor_str, node->vendor_str, sizeof(line->vendor_str) - 1);
     
@@ -173,8 +190,8 @@ void render_screen(int scroll_y) {
     clear();
     
     attron(A_REVERSE);
-    mvprintw(0, 0, "%-16s %-10s %-10s %-45s %-15s %-15s", 
-             "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed");
+    mvprintw(0, 0, "%-16s %-10s %-10s %-35s %-15s %-12s %-12s %-12s", 
+             "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed", "RX", "TX");
     attroff(A_REVERSE);
     
     int max_y, max_x;
@@ -192,12 +209,12 @@ void render_screen(int scroll_y) {
         }
         
         // Truncate strings to fit nice columns
-        char device_trunc[46];
-        strncpy(device_trunc, l->device_str, 45);
-        device_trunc[45] = '\0';
+        char device_trunc[36];
+        strncpy(device_trunc, l->device_str, 35);
+        device_trunc[35] = '\0';
         
-        mvprintw(i + 1, 0, "%-16s %-10s %-10s %-45s %-15s %-15s",
-                 l->tree_str, l->bdf_str, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str);
+        mvprintw(i + 1, 0, "%-16s %-10s %-10s %-35s %-15s %-12s %-12s %-12s",
+                 l->tree_str, l->bdf_str, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str, l->rx_rate_str, l->tx_rate_str);
         
         if (l->is_hidden_node) {
             attroff(A_DIM);
@@ -234,6 +251,11 @@ int main(void) {
         int num_roots = 0;
         PciNode *all_nodes = NULL;
         PciNode **roots = build_pci_tree(pacc, &num_roots, &all_nodes);
+        
+        int total_devices = 0;
+        for (struct pci_dev *dev = pacc->devices; dev; dev = dev->next) total_devices++;
+        
+        update_throughput(all_nodes, total_devices);
         build_render_list(roots, num_roots);
         
         getmaxyx(stdscr, max_y, max_x);

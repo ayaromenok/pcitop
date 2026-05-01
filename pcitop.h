@@ -21,6 +21,8 @@ typedef struct PciNode {
     float device_max_speed; // Hardware capability from LNKCAP2
     char dbdf_str[32];
     bool hidden;
+    float rx_rate; // MB/s
+    float tx_rate; // MB/s
 
     // Topology
     int primary_bus;
@@ -49,5 +51,8 @@ void load_settings(void);
 void save_settings(void);
 bool is_hidden(const char *dbdf);
 void toggle_hidden(const char *dbdf);
+
+// Throughput management
+void update_throughput(PciNode *all_nodes, int total_devices);
 
 #endif // PCITOP_H

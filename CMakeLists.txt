@@ -11,5 +11,5 @@ pkg_check_modules(NCURSES REQUIRED ncurses)
 include_directories(${PCI_INCLUDE_DIRS} ${NCURSES_INCLUDE_DIRS})
 link_directories(${PCI_LIBRARY_DIRS} ${NCURSES_LIBRARY_DIRS})
 
-add_executable(pcitop main.c pci_tree.c)
+add_executable(pcitop main.c pci_tree.c throughput.c)
 target_link_libraries(pcitop ${PCI_LIBRARIES} ${NCURSES_LIBRARIES} tinfo)
