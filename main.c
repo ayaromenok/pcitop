@@ -15,6 +15,7 @@ int selected_line = 0;
 int num_lines = 0;
 int refresh_ms = 1000;
 int throughput_ms = 100;
+bool logging_enabled = false;
 FILE *log_file = NULL;
 
 static long long get_time_ms(void) {
@@ -58,6 +59,8 @@ void load_settings(void) {
                 throughput_ms = atoi(line + 14);
                 if (throughput_ms < 1) throughput_ms = 1;
                 if (throughput_ms > 5000) throughput_ms = 5000;
+            } else if (strncmp(line, "logging_enabled=", 16) == 0) {
+                logging_enabled = (atoi(line + 16) == 1);
             }
         }
     }
@@ -69,6 +72,7 @@ void save_settings(void) {
     if (!f) return;
     fprintf(f, "[general]\n");
     fprintf(f, "throughput_ms=%d\n", throughput_ms);
+    fprintf(f, "logging_enabled=%d\n", logging_enabled ? 1 : 0);
     fprintf(f, "\n[hidden]\n");
     for (int i = 0; i < num_hidden; i++) {
         fprintf(f, "%s=1\n", hidden_dbdfs[i]);
@@ -272,8 +276,33 @@ void render_screen(int scroll_y) {
 #include <unistd.h>
 #include <time.h>
 
+void start_logging(void) {
+    if (log_file) return;
+    char hostname[128];
+    if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
+    time_t now_time = time(NULL);
+    struct tm *t = localtime(&now_time);
+    char log_filename[256];
+    strftime(log_filename, sizeof(log_filename), "%Y%m%d%H%M%S", t);
+    char full_log_path[512];
+    snprintf(full_log_path, sizeof(full_log_path), "%s_%s.log", hostname, log_filename);
+    log_file = fopen(full_log_path, "w");
+    if (log_file) {
+        fprintf(log_file, "PCIe Throughput Log for %s starting at %s", hostname, asctime(t));
+        fprintf(log_file, "Format: Timestamp | Global Sum RX, TX | [DBDF: RX, TX, ...]\n\n");
+    }
+}
+
+void stop_logging(void) {
+    if (log_file) {
+        fclose(log_file);
+        log_file = NULL;
+    }
+}
+
 int main(void) {
     load_settings();
+    if (logging_enabled) start_logging();
 
     initscr();
     start_color();
@@ -382,24 +411,10 @@ int main(void) {
                 reset_throughput();
                 force_gui_render = true;
             } else if (ch == 'l') {
-                if (log_file) {
-                    fclose(log_file);
-                    log_file = NULL;
-                } else {
-                    char hostname[128];
-                    if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
-                    time_t now_time = time(NULL);
-                    struct tm *t = localtime(&now_time);
-                    char log_filename[256];
-                    strftime(log_filename, sizeof(log_filename), "%Y%m%d%H%M%S", t);
-                    char full_log_path[512];
-                    snprintf(full_log_path, sizeof(full_log_path), "%s_%s.log", hostname, log_filename);
-                    log_file = fopen(full_log_path, "w");
-                    if (log_file) {
-                        fprintf(log_file, "PCIe Throughput Log for %s starting at %s", hostname, asctime(t));
-                        fprintf(log_file, "Format: Timestamp | Global Sum RX, TX | [DBDF: RX, TX, ...]\n\n");
-                    }
-                }
+                logging_enabled = !logging_enabled;
+                if (logging_enabled) start_logging();
+                else stop_logging();
+                save_settings();
                 force_gui_render = true;
             } else if (ch == '+' || ch == '=') {
                 if (throughput_ms < 5000) {
