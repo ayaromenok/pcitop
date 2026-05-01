@@ -306,8 +306,6 @@ void write_log_entry(PciNode *all_nodes, int total_devices, const char *session_
             FILE *f = fopen(filename, "a");
             if (f) {
                 if (is_new) {
-                    // Reserve 80 bytes for the finalized sum line
-                    fprintf(f, "FINAL SumRX: %15s MB, SumTX: %15s MB [PENDING]   \n", " ", " ");
                     fprintf(f, "Format: Timestamp, RX_MB, TX_MB\n");
                 }
                 fprintf(f, "%s, %.2f, %.2f\n", ts, node->interval_rx, node->interval_tx);
@@ -333,13 +331,13 @@ void finalize_logs(PciNode *all_nodes, int total_devices, const char *session_ts
         char filename[512];
         snprintf(filename, sizeof(filename), "logs/%s_%s_%s.log", hostname, dev_name_san, session_ts);
 
-        // Open in r+ to update the first line
-        FILE *f = fopen(filename, "r+");
+        // Append final totals to the end of the file
+        FILE *f = fopen(filename, "a");
         if (f) {
             DeviceStats *s = get_or_create_stats(node->dbdf_str);
             double session_rx = node->total_rx - (s ? s->log_start_rx : 0);
             double session_tx = node->total_tx - (s ? s->log_start_tx : 0);
-            fprintf(f, "FINAL SumRX: %15.2f MB, SumTX: %15.2f MB [FINALIZED] ", session_rx, session_tx);
+            fprintf(f, "\nTOTAL Session RX_MB: %.2f, TOTAL Session TX_MB: %.2f\n", session_rx, session_tx);
             fclose(f);
         }
     }
