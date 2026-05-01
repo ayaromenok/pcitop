@@ -88,6 +88,8 @@ typedef struct {
     char cur_spd_str[32];
     char rx_rate_str[16];
     char tx_rate_str[16];
+    char total_rx_str[16];
+    char total_tx_str[16];
     bool is_hidden_node;
     char dbdf_str[32];
 } RenderLine;
@@ -118,6 +120,20 @@ static void format_rate(float rate_mb, char *buf, size_t size) {
     }
 }
 
+static void format_size(float size_mb, char *buf, size_t size) {
+    if (size_mb == 0.0f) {
+        strcpy(buf, "-");
+    } else if (size_mb < 1.0f) {
+        snprintf(buf, size, "%.1f KB", size_mb * 1024.0f);
+    } else if (size_mb < 1024.0f) {
+        snprintf(buf, size, "%.1f MB", size_mb);
+    } else if (size_mb < 1024.0f * 1024.0f) {
+        snprintf(buf, size, "%.1f GB", size_mb / 1024.0f);
+    } else {
+        snprintf(buf, size, "%.1f TB", size_mb / (1024.0f * 1024.0f));
+    }
+}
+
 void add_render_line(const char *tree, PciNode *node) {
     if (num_lines >= max_lines) {
         max_lines = max_lines == 0 ? 128 : max_lines * 2;
@@ -132,6 +148,8 @@ void add_render_line(const char *tree, PciNode *node) {
     
     format_rate(node->rx_rate, line->rx_rate_str, sizeof(line->rx_rate_str));
     format_rate(node->tx_rate, line->tx_rate_str, sizeof(line->tx_rate_str));
+    format_size(node->total_rx, line->total_rx_str, sizeof(line->total_rx_str));
+    format_size(node->total_tx, line->total_tx_str, sizeof(line->total_tx_str));
 
     // Vendor might be shortened
     strncpy(line->vendor_str, node->vendor_str, sizeof(line->vendor_str) - 1);
@@ -190,8 +208,8 @@ void render_screen(int scroll_y) {
     clear();
     
     attron(A_REVERSE);
-    mvprintw(0, 0, "%-16s %-10s %-10s %-35s %-15s %-12s %-12s %-12s", 
-             "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed", "RX", "TX");
+    mvprintw(0, 0, "%-16s %-10s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s", 
+             "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed", "RX", "TX", "Sum RX", "Sum TX");
     attroff(A_REVERSE);
     
     int max_y, max_x;
@@ -209,12 +227,13 @@ void render_screen(int scroll_y) {
         }
         
         // Truncate strings to fit nice columns
-        char device_trunc[36];
-        strncpy(device_trunc, l->device_str, 35);
-        device_trunc[35] = '\0';
+        char device_trunc[26];
+        strncpy(device_trunc, l->device_str, 25);
+        device_trunc[25] = '\0';
         
-        mvprintw(i + 1, 0, "%-16s %-10s %-10s %-35s %-15s %-12s %-12s %-12s",
-                 l->tree_str, l->bdf_str, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str, l->rx_rate_str, l->tx_rate_str);
+        mvprintw(i + 1, 0, "%-16s %-10s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s",
+                 l->tree_str, l->bdf_str, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str, 
+                 l->rx_rate_str, l->tx_rate_str, l->total_rx_str, l->total_tx_str);
         
         if (l->is_hidden_node) {
             attroff(A_DIM);
@@ -225,7 +244,7 @@ void render_screen(int scroll_y) {
     }
 
     // Status bar
-    mvprintw(max_y - 1, 0, "Press 'h' to hide/show, 'H' to toggle hidden display, 'q' to quit. Mode: %s", 
+    mvprintw(max_y - 1, 0, "Press 'h' to hide/show, 'H' to toggle hidden, 'r' to reset Sums, 'q' to quit. Mode: %s", 
              show_hidden_mode ? "Show All" : "Hide Hidden");
     
     refresh();
@@ -297,6 +316,8 @@ int main(void) {
             }
         } else if (ch == 'H') {
             show_hidden_mode = !show_hidden_mode;
+        } else if (ch == 'r') {
+            reset_throughput();
         }
     }
     

@@ -116,6 +116,8 @@ PciNode **build_pci_tree(struct pci_access *pacc, int *num_roots, PciNode **out_
         node->hidden = is_hidden(node->dbdf_str);
         node->rx_rate = 0.0f;
         node->tx_rate = 0.0f;
+        node->total_rx = 0.0f;
+        node->total_tx = 0.0f;
         
         char vendor_buf[256];
         char device_buf[256];

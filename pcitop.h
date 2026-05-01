@@ -23,6 +23,8 @@ typedef struct PciNode {
     bool hidden;
     float rx_rate; // MB/s
     float tx_rate; // MB/s
+    float total_rx; // MB
+    float total_tx; // MB
 
     // Topology
     int primary_bus;
@@ -54,5 +56,6 @@ void toggle_hidden(const char *dbdf);
 
 // Throughput management
 void update_throughput(PciNode *all_nodes, int total_devices);
+void reset_throughput(void);
 
 #endif // PCITOP_H
