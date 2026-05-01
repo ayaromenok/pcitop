@@ -17,6 +17,11 @@
 - **Non-Root Support**: Automatically falls back to sysfs to display link speeds and widths when run without `sudo`.
 - **Decoupled Architecture**: High-frequency background sampling (up to 1ms) with a stable, throttled GUI (1s) to eliminate flickering.
 
+## It's NOT a
+
+- Not a full logging tool. Some logging info can be added later - but it's not a goal of this tool
+- Not working with different internal buses which just looks like PCI for OS - like AMD Infinity Fabric inside of APU
+
 ## Screenshots
 
 - Show only interesting devices
