@@ -60,3 +60,8 @@ make
 
 ## License
 MIT License
+
+## Implementation
+
+- This version mostly implemented with Google Antigravity using Gemini 3 Flash and Gemini 3 Pro models with some manual coding/fixing.
+- While I implement a few more version of pcitop - by hands and with local models like qwen 3.6 and gemma4 - this version looks more promising and suitable for third-party use.
