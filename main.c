@@ -260,6 +260,10 @@ void render_screen(int scroll_y) {
     // Status bar
     mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  GUI: %dms  +/-:Tput (%dms)  q:quit", 
              refresh_ms, throughput_ms);
+
+    char version_str[64];
+    snprintf(version_str, sizeof(version_str), "pcitop build: %s version: %s", GIT_BUILD, GIT_VERSION);
+    mvprintw(max_y - 1, max_x - strlen(version_str) - 1, "%s", version_str);
     
     refresh();
 }
