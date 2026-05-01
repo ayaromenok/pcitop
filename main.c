@@ -11,7 +11,7 @@ char hidden_dbdfs[MAX_HIDDEN_DEVICES][32];
 int num_hidden = 0;
 bool show_hidden_mode = false;
 int selected_line = 0;
-int refresh_ms = 100;
+int refresh_ms = 1000;
 
 void load_settings(void) {
     FILE *f = fopen(SETTINGS_FILE, "r");
