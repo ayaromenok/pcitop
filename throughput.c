@@ -257,32 +257,50 @@ void update_throughput(PciNode *all_nodes, int total_devices) {
     update_nvme_throughput(all_nodes, total_devices);
 }
 
-void write_log_entry(FILE *f, PciNode *all_nodes, int total_devices) {
-    if (!f) return;
+#include <sys/stat.h>
+#include <ctype.h>
+#include <unistd.h>
+
+static void sanitize_filename(char *s) {
+    for (; *s; s++) {
+        if (!isalnum(*s) && *s != '-' && *s != '_' && *s != '.') {
+            *s = '_';
+        }
+    }
+}
+
+void write_log_entry(PciNode *all_nodes, int total_devices, const char *session_ts) {
+    char hostname[128];
+    if (gethostname(hostname, sizeof(hostname)) != 0) strcpy(hostname, "unknown");
+
+    mkdir("logs", 0755);
 
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     char ts[32];
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
 
-    float sum_rx = 0, sum_tx = 0;
     for (int i = 0; i < total_devices; i++) {
-        if (!all_nodes[i].hidden) {
-            sum_rx += all_nodes[i].interval_rx;
-            sum_tx += all_nodes[i].interval_tx;
-        }
-    }
+        PciNode *node = &all_nodes[i];
+        if (!node->hidden && (node->interval_rx > 0 || node->interval_tx > 0)) {
+            char dev_name_san[128];
+            strncpy(dev_name_san, node->device_str, sizeof(dev_name_san) - 1);
+            dev_name_san[sizeof(dev_name_san)-1] = '\0';
+            sanitize_filename(dev_name_san);
 
-    fprintf(f, "%s | SumRX: %.2f MB, SumTX: %.2f MB | ", ts, sum_rx, sum_tx);
-    
-    bool first = true;
-    for (int i = 0; i < total_devices; i++) {
-        if (!all_nodes[i].hidden && (all_nodes[i].interval_rx > 0 || all_nodes[i].interval_tx > 0)) {
-            if (!first) fprintf(f, ", ");
-            fprintf(f, "%s: RX %.2f MB, TX %.2f MB", all_nodes[i].dbdf_str, all_nodes[i].interval_rx, all_nodes[i].interval_tx);
-            first = false;
+            char filename[512];
+            snprintf(filename, sizeof(filename), "logs/%s_%s_%s.log", hostname, dev_name_san, session_ts);
+
+            bool is_new = (access(filename, F_OK) == -1);
+            FILE *f = fopen(filename, "a");
+            if (f) {
+                if (is_new) {
+                    fprintf(f, "SumRX: %.2f MB, SumTX: %.2f MB\n", node->total_rx, node->total_tx);
+                    fprintf(f, "Format: Timestamp, RX_MB, TX_MB\n");
+                }
+                fprintf(f, "%s, %.2f, %.2f\n", ts, node->interval_rx, node->interval_tx);
+                fclose(f);
+            }
         }
     }
-    fprintf(f, "\n");
-    fflush(f);
 }
