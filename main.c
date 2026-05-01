@@ -253,7 +253,7 @@ void render_screen(int scroll_y) {
     }
 
     // Status bar
-    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  +/-:GUI (%dms)  Tput: %dms  q:quit", 
+    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  GUI: %dms  +/-:Tput (%dms)  q:quit", 
              refresh_ms, throughput_ms);
     
     refresh();
@@ -356,10 +356,10 @@ int main(void) {
                 reset_throughput();
                 force_gui_update = true;
             } else if (ch == '+' || ch == '=') {
-                if (refresh_ms < 5000) refresh_ms += 100;
+                if (throughput_ms < 1000) throughput_ms += 10;
                 force_gui_update = true;
             } else if (ch == '-' || ch == '_') {
-                if (refresh_ms > 100) refresh_ms -= 100;
+                if (throughput_ms > 10) throughput_ms -= 10;
                 force_gui_update = true;
             }
         }
