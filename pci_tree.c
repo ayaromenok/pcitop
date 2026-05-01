@@ -112,6 +112,8 @@ PciNode **build_pci_tree(struct pci_access *pacc, int *num_roots, PciNode **out_
         PciNode *node = &all_nodes[idx++];
         node->dev = dev;
         snprintf(node->bdf_str, sizeof(node->bdf_str), "%02x:%02x.%d", dev->bus, dev->dev, dev->func);
+        snprintf(node->dbdf_str, sizeof(node->dbdf_str), "%04x:%02x:%02x.%d", dev->domain, dev->bus, dev->dev, dev->func);
+        node->hidden = is_hidden(node->dbdf_str);
         
         char vendor_buf[256];
         char device_buf[256];

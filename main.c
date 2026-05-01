@@ -2,6 +2,81 @@
 #include <ncurses.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+
+#define SETTINGS_FILE "pcitop.ini"
+#define MAX_HIDDEN_DEVICES 1024
+
+char hidden_dbdfs[MAX_HIDDEN_DEVICES][32];
+int num_hidden = 0;
+bool show_hidden_mode = false;
+int selected_line = 0;
+
+void load_settings(void) {
+    FILE *f = fopen(SETTINGS_FILE, "r");
+    if (!f) return;
+    char line[64];
+    bool in_hidden_section = false;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (strcmp(line, "[hidden]") == 0) {
+            in_hidden_section = true;
+            continue;
+        }
+        if (line[0] == '[') {
+            in_hidden_section = false;
+            continue;
+        }
+        if (in_hidden_section && line[0] != '\0') {
+            char *eq = strchr(line, '=');
+            if (eq) *eq = '\0';
+            if (num_hidden < MAX_HIDDEN_DEVICES) {
+                strncpy(hidden_dbdfs[num_hidden++], line, 31);
+            }
+        }
+    }
+    fclose(f);
+}
+
+void save_settings(void) {
+    FILE *f = fopen(SETTINGS_FILE, "w");
+    if (!f) return;
+    fprintf(f, "[hidden]\n");
+    for (int i = 0; i < num_hidden; i++) {
+        fprintf(f, "%s=1\n", hidden_dbdfs[i]);
+    }
+    fclose(f);
+}
+
+bool is_hidden(const char *dbdf) {
+    for (int i = 0; i < num_hidden; i++) {
+        if (strcmp(hidden_dbdfs[i], dbdf) == 0) return true;
+    }
+    return false;
+}
+
+void toggle_hidden(const char *dbdf) {
+    int found_idx = -1;
+    for (int i = 0; i < num_hidden; i++) {
+        if (strcmp(hidden_dbdfs[i], dbdf) == 0) {
+            found_idx = i;
+            break;
+        }
+    }
+    if (found_idx != -1) {
+        // Remove
+        for (int i = found_idx; i < num_hidden - 1; i++) {
+            strcpy(hidden_dbdfs[i], hidden_dbdfs[i+1]);
+        }
+        num_hidden--;
+    } else {
+        // Add
+        if (num_hidden < MAX_HIDDEN_DEVICES) {
+            strncpy(hidden_dbdfs[num_hidden++], dbdf, 31);
+        }
+    }
+    save_settings();
+}
 
 // Global array to hold flat lines for rendering
 typedef struct {
@@ -11,6 +86,8 @@ typedef struct {
     char device_str[128];
     char max_spd_str[32];
     char cur_spd_str[32];
+    bool is_hidden_node;
+    char dbdf_str[32];
 } RenderLine;
 
 RenderLine *render_lines = NULL;
@@ -36,6 +113,8 @@ void add_render_line(const char *tree, PciNode *node) {
     RenderLine *line = &render_lines[num_lines++];
     strncpy(line->tree_str, tree, sizeof(line->tree_str) - 1);
     strncpy(line->bdf_str, node->bdf_str, sizeof(line->bdf_str) - 1);
+    strncpy(line->dbdf_str, node->dbdf_str, sizeof(line->dbdf_str) - 1);
+    line->is_hidden_node = node->hidden;
     
     // Vendor might be shortened
     strncpy(line->vendor_str, node->vendor_str, sizeof(line->vendor_str) - 1);
@@ -63,6 +142,8 @@ void add_render_line(const char *tree, PciNode *node) {
 }
 
 void flatten_tree(PciNode *node, const char *prefix, bool is_last) {
+    if (node->hidden && !show_hidden_mode) return;
+
     char tree_col[128];
     char new_prefix[128];
     
@@ -99,8 +180,16 @@ void render_screen(int scroll_y) {
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
     
-    for (int i = 0; i < max_y - 1 && (i + scroll_y) < num_lines; i++) {
-        RenderLine *l = &render_lines[i + scroll_y];
+    for (int i = 0; i < max_y - 2 && (i + scroll_y) < num_lines; i++) {
+        int idx = i + scroll_y;
+        RenderLine *l = &render_lines[idx];
+        
+        if (idx == selected_line) {
+            attron(A_BOLD | COLOR_PAIR(1));
+        }
+        if (l->is_hidden_node) {
+            attron(A_DIM);
+        }
         
         // Truncate strings to fit nice columns
         char device_trunc[46];
@@ -109,13 +198,27 @@ void render_screen(int scroll_y) {
         
         mvprintw(i + 1, 0, "%-16s %-10s %-10s %-45s %-15s %-15s",
                  l->tree_str, l->bdf_str, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str);
+        
+        if (l->is_hidden_node) {
+            attroff(A_DIM);
+        }
+        if (idx == selected_line) {
+            attroff(A_BOLD | COLOR_PAIR(1));
+        }
     }
+
+    // Status bar
+    mvprintw(max_y - 1, 0, "Press 'h' to hide/show, 'H' to toggle hidden display, 'q' to quit. Mode: %s", 
+             show_hidden_mode ? "Show All" : "Hide Hidden");
     
     refresh();
 }
 
 int main(void) {
+    load_settings();
     initscr();
+    start_color();
+    init_pair(1, COLOR_YELLOW, COLOR_BLUE); // Highlight pair
     cbreak();
     noecho();
     keypad(stdscr, TRUE);
@@ -134,8 +237,17 @@ int main(void) {
         build_render_list(roots, num_roots);
         
         getmaxyx(stdscr, max_y, max_x);
-        if (scroll_y > num_lines - (max_y - 1)) {
-            scroll_y = num_lines - (max_y - 1);
+        
+        // Adjust selection if it went out of bounds (e.g. after hiding)
+        if (selected_line >= num_lines) selected_line = num_lines - 1;
+        if (selected_line < 0) selected_line = 0;
+
+        // Auto-scroll to keep selection visible
+        if (selected_line < scroll_y) scroll_y = selected_line;
+        if (selected_line >= scroll_y + (max_y - 2)) scroll_y = selected_line - (max_y - 3);
+
+        if (scroll_y > num_lines - (max_y - 2)) {
+            scroll_y = num_lines - (max_y - 2);
         }
         if (scroll_y < 0) scroll_y = 0;
         
@@ -148,15 +260,21 @@ int main(void) {
         if (ch == 'q' || ch == 'Q') {
             break;
         } else if (ch == KEY_UP) {
-            if (scroll_y > 0) scroll_y--;
+            if (selected_line > 0) selected_line--;
         } else if (ch == KEY_DOWN) {
-            if (scroll_y < num_lines - (max_y - 1)) scroll_y++;
+            if (selected_line < num_lines - 1) selected_line++;
         } else if (ch == KEY_NPAGE) {
-            scroll_y += (max_y - 2);
-            if (scroll_y > num_lines - (max_y - 1)) scroll_y = num_lines - (max_y - 1);
+            selected_line += (max_y - 2);
+            if (selected_line >= num_lines) selected_line = num_lines - 1;
         } else if (ch == KEY_PPAGE) {
-            scroll_y -= (max_y - 2);
-            if (scroll_y < 0) scroll_y = 0;
+            selected_line -= (max_y - 2);
+            if (selected_line < 0) selected_line = 0;
+        } else if (ch == 'h') {
+            if (num_lines > 0) {
+                toggle_hidden(render_lines[selected_line].dbdf_str);
+            }
+        } else if (ch == 'H') {
+            show_hidden_mode = !show_hidden_mode;
         }
     }
     

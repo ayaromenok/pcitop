@@ -19,6 +19,8 @@ typedef struct PciNode {
     float cur_speed;
     int cur_width;
     float device_max_speed; // Hardware capability from LNKCAP2
+    char dbdf_str[32];
+    bool hidden;
 
     // Topology
     int primary_bus;
@@ -41,5 +43,11 @@ void free_pci_tree(PciNode **roots, PciNode *all_nodes);
 
 // String replacement for vendors
 void shorten_vendor_name(char *vendor_str);
+
+// Settings management
+void load_settings(void);
+void save_settings(void);
+bool is_hidden(const char *dbdf);
+void toggle_hidden(const char *dbdf);
 
 #endif // PCITOP_H
