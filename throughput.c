@@ -61,6 +61,16 @@ void reset_throughput(void) {
     }
 }
 
+static void normalize_dbdf(const char *in, char *out) {
+    unsigned int d, b, s, f;
+    if (sscanf(in, "%x:%x:%x.%x", &d, &b, &s, &f) == 4) {
+        snprintf(out, 32, "%04x:%02x:%02x.%d", d, b, s, f);
+    } else {
+        strncpy(out, in, 31);
+        out[31] = '\0';
+    }
+}
+
 void update_nvidia_throughput(PciNode *all_nodes, int total_devices) {
     double now = get_time_sec();
     // Get mapping: index -> DBDF
@@ -72,10 +82,10 @@ void update_nvidia_throughput(PciNode *all_nodes, int total_devices) {
     int max_gpu_idx = -1;
     while (fgets(line, sizeof(line), fp)) {
         int idx;
-        char dbdf[32];
-        if (sscanf(line, "%d, %s", &idx, dbdf) == 2) {
+        char dbdf_raw[64];
+        if (sscanf(line, "%d, %s", &idx, dbdf_raw) == 2) {
             if (idx < 16) {
-                strncpy(gpu_mappings[idx], dbdf, 31);
+                normalize_dbdf(dbdf_raw, gpu_mappings[idx]);
                 if (idx > max_gpu_idx) max_gpu_idx = idx;
             }
         }
