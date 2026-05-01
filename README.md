@@ -19,6 +19,7 @@
 
 ## Screenshots
 
+- Show only interesting devices
 ![Device Selection](doc/pcitop_show-selected_devices.png)
 
 ## Keybindings
