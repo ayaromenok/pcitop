@@ -51,40 +51,65 @@ static float decode_link_speed(int speed_code) {
     }
 }
 
-static void read_pcie_link_info(struct pci_dev *dev, float *max_spd, int *max_wd, float *cur_spd, int *cur_wd, float *dev_max_spd) {
+static float parse_sysfs_speed(const char *dbdf, const char *filename) {
+    char path[256];
+    snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/%s", dbdf, filename);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0.0f;
+    float val = 0.0f;
+    if (fscanf(f, "%f", &val) != 1) val = 0.0f;
+    fclose(f);
+    return val;
+}
+
+static int parse_sysfs_int(const char *dbdf, const char *filename) {
+    char path[256];
+    snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/%s", dbdf, filename);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int val = 0;
+    if (fscanf(f, "%d", &val) != 1) val = 0;
+    fclose(f);
+    return val;
+}
+
+static void read_pcie_link_info(struct pci_dev *dev, const char *dbdf, float *max_spd, int *max_wd, float *cur_spd, int *cur_wd, float *dev_max_spd) {
     *max_spd = 0.0f; *max_wd = 0;
     *cur_spd = 0.0f; *cur_wd = 0;
     *dev_max_spd = 0.0f;
 
     struct pci_cap *cap = pci_find_cap(dev, PCI_CAP_ID_EXP, PCI_CAP_NORMAL);
-    if (!cap) return;
-    int cap_pos = cap->addr;
+    if (cap) {
+        int cap_pos = cap->addr;
+        u32 lnkcap = pci_read_long(dev, cap_pos + PCI_EXP_LNKCAP);
+        if (lnkcap != 0xffffffff && lnkcap != 0) {
+            *max_spd = decode_link_speed(lnkcap & 0xf);
+            *max_wd = (lnkcap >> 4) & 0x3f;
+        }
 
-    // LnkCap is 32-bit at cap_pos + 0x0c
-    // max speed: bits 0-3
-    // max width: bits 4-9
-    u32 lnkcap = pci_read_long(dev, cap_pos + PCI_EXP_LNKCAP);
-    *max_spd = decode_link_speed(lnkcap & 0xf);
-    *max_wd = (lnkcap >> 4) & 0x3f;
+        u16 lnksta = pci_read_word(dev, cap_pos + PCI_EXP_LNKSTA);
+        if (lnksta != 0xffff && lnksta != 0) {
+            *cur_spd = decode_link_speed(lnksta & 0xf);
+            *cur_wd = (lnksta >> 4) & 0x3f;
+        }
 
-    // LnkSta is 16-bit at cap_pos + 0x12
-    // cur speed: bits 0-3
-    // cur width: bits 4-9
-    u16 lnksta = pci_read_word(dev, cap_pos + PCI_EXP_LNKSTA);
-    *cur_spd = decode_link_speed(lnksta & 0xf);
-    *cur_wd = (lnksta >> 4) & 0x3f;
-
-    // LnkCap2 (PCIe 2.0+) at cap_pos + 0x2c
-    // Supported Link Speeds Vector: bits 7:1
-    u32 lnkcap2 = pci_read_long(dev, cap_pos + PCI_EXP_LNKCAP2);
-    if (lnkcap2 > 0 && lnkcap2 != 0xffffffff) {
-        if (lnkcap2 & (1 << 6)) *dev_max_spd = 64.0f;
-        else if (lnkcap2 & (1 << 5)) *dev_max_spd = 32.0f;
-        else if (lnkcap2 & (1 << 4)) *dev_max_spd = 16.0f;
-        else if (lnkcap2 & (1 << 3)) *dev_max_spd = 8.0f;
-        else if (lnkcap2 & (1 << 2)) *dev_max_spd = 5.0f;
-        else if (lnkcap2 & (1 << 1)) *dev_max_spd = 2.5f;
+        u32 lnkcap2 = pci_read_long(dev, cap_pos + PCI_EXP_LNKCAP2);
+        if (lnkcap2 > 0 && lnkcap2 != 0xffffffff) {
+            if (lnkcap2 & (1 << 6)) *dev_max_spd = 64.0f;
+            else if (lnkcap2 & (1 << 5)) *dev_max_spd = 32.0f;
+            else if (lnkcap2 & (1 << 4)) *dev_max_spd = 16.0f;
+            else if (lnkcap2 & (1 << 3)) *dev_max_spd = 8.0f;
+            else if (lnkcap2 & (1 << 2)) *dev_max_spd = 5.0f;
+            else if (lnkcap2 & (1 << 1)) *dev_max_spd = 2.5f;
+        }
     }
+
+    // Fallback to sysfs if still zero (common when not root)
+    if (*max_spd == 0.0f) *max_spd = parse_sysfs_speed(dbdf, "max_link_speed");
+    if (*max_wd == 0) *max_wd = parse_sysfs_int(dbdf, "max_link_width");
+    if (*cur_spd == 0.0f) *cur_spd = parse_sysfs_speed(dbdf, "current_link_speed");
+    if (*cur_wd == 0) *cur_wd = parse_sysfs_int(dbdf, "current_link_width");
+    
     if (*dev_max_spd == 0.0f) *dev_max_spd = *max_spd;
 }
 
@@ -129,7 +154,7 @@ PciNode **build_pci_tree(struct pci_access *pacc, int *num_roots, PciNode **out_
         
         strncpy(node->device_str, device_buf, sizeof(node->device_str) - 1);
         
-        read_pcie_link_info(dev, &node->max_speed, &node->max_width, &node->cur_speed, &node->cur_width, &node->device_max_speed);
+        read_pcie_link_info(dev, node->dbdf_str, &node->max_speed, &node->max_width, &node->cur_speed, &node->cur_width, &node->device_max_speed);
 
         // Check if bridge
         u8 header_type = pci_read_byte(dev, PCI_HEADER_TYPE) & 0x7f;
