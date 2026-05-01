@@ -13,6 +13,8 @@ typedef struct {
     double last_time;
     double acc_rx_mb;
     double acc_tx_mb;
+    double gui_base_rx;
+    double gui_base_tx;
 } DeviceStats;
 
 #define MAX_STATS 1024
@@ -36,15 +38,26 @@ static DeviceStats* get_or_create_stats(const char *dbdf) {
         global_stats[num_stats].last_time = 0;
         global_stats[num_stats].acc_rx_mb = 0;
         global_stats[num_stats].acc_tx_mb = 0;
+        global_stats[num_stats].gui_base_rx = 0;
+        global_stats[num_stats].gui_base_tx = 0;
         return &global_stats[num_stats++];
     }
     return NULL;
+}
+
+void mark_gui_cycle(void) {
+    for (int i = 0; i < num_stats; i++) {
+        global_stats[i].gui_base_rx = global_stats[i].acc_rx_mb;
+        global_stats[i].gui_base_tx = global_stats[i].acc_tx_mb;
+    }
 }
 
 void reset_throughput(void) {
     for (int i = 0; i < num_stats; i++) {
         global_stats[i].acc_rx_mb = 0;
         global_stats[i].acc_tx_mb = 0;
+        global_stats[i].gui_base_rx = 0;
+        global_stats[i].gui_base_tx = 0;
     }
 }
 
@@ -97,6 +110,8 @@ void update_nvidia_throughput(PciNode *all_nodes, int total_devices) {
                             s->last_time = now;
                             all_nodes[i].total_rx = (float)s->acc_rx_mb;
                             all_nodes[i].total_tx = (float)s->acc_tx_mb;
+                            all_nodes[i].interval_rx = (float)(s->acc_rx_mb - s->gui_base_rx);
+                            all_nodes[i].interval_tx = (float)(s->acc_tx_mb - s->gui_base_tx);
                         }
                     }
                 }
@@ -145,6 +160,8 @@ void update_net_throughput(PciNode *all_nodes, int total_devices) {
                             s->last_time = now;
                             all_nodes[i].total_rx = (float)s->acc_rx_mb;
                             all_nodes[i].total_tx = (float)s->acc_tx_mb;
+                            all_nodes[i].interval_rx = (float)(s->acc_rx_mb - s->gui_base_rx);
+                            all_nodes[i].interval_tx = (float)(s->acc_tx_mb - s->gui_base_tx);
                         }
                     }
                 }
@@ -206,6 +223,8 @@ void update_nvme_throughput(PciNode *all_nodes, int total_devices) {
                                         s->last_time = now;
                                         all_nodes[i].total_rx = (float)s->acc_rx_mb;
                                         all_nodes[i].total_tx = (float)s->acc_tx_mb;
+                                        all_nodes[i].interval_rx = (float)(s->acc_rx_mb - s->gui_base_rx);
+                                        all_nodes[i].interval_tx = (float)(s->acc_tx_mb - s->gui_base_tx);
                                     }
                                 }
                                 fclose(f);

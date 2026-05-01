@@ -117,18 +117,6 @@ static int get_gen_num(float speed) {
     return 0;
 }
 
-static void format_rate(float rate_mb, char *buf, size_t size) {
-    if (rate_mb == 0.0f) {
-        strcpy(buf, "-");
-    } else if (rate_mb < 1.0f) {
-        snprintf(buf, size, "%.1f KB/s", rate_mb * 1024.0f);
-    } else if (rate_mb < 1024.0f) {
-        snprintf(buf, size, "%.1f MB/s", rate_mb);
-    } else {
-        snprintf(buf, size, "%.1f GB/s", rate_mb / 1024.0f);
-    }
-}
-
 static void format_size(float size_mb, char *buf, size_t size) {
     if (size_mb == 0.0f) {
         strcpy(buf, "-");
@@ -155,8 +143,8 @@ void add_render_line(const char *tree, PciNode *node) {
     strncpy(line->dbdf_str, node->dbdf_str, sizeof(line->dbdf_str) - 1);
     line->is_hidden_node = node->hidden;
     
-    format_rate(node->rx_rate, line->rx_rate_str, sizeof(line->rx_rate_str));
-    format_rate(node->tx_rate, line->tx_rate_str, sizeof(line->tx_rate_str));
+    format_size(node->interval_rx, line->rx_rate_str, sizeof(line->rx_rate_str));
+    format_size(node->interval_tx, line->tx_rate_str, sizeof(line->tx_rate_str));
     format_size(node->total_rx, line->total_rx_str, sizeof(line->total_rx_str));
     format_size(node->total_tx, line->total_tx_str, sizeof(line->total_tx_str));
 
@@ -218,7 +206,7 @@ void render_screen(int scroll_y) {
     
     attron(A_REVERSE);
     mvprintw(0, 0, "%-16s %-10s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s", 
-             "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed", "RX", "TX", "Sum RX", "Sum TX");
+             "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed", "RX (Interval)", "TX (Interval)", "Sum RX", "Sum TX");
     attroff(A_REVERSE);
     
     int max_y, max_x;
@@ -273,7 +261,7 @@ int main(void) {
     int max_y, max_x;
     long long last_gui_update = 0;
     long long last_tput_update = 0;
-    bool force_gui_update = true;
+    bool force_gui_render = true;
 
     struct pci_access *pacc = NULL;
     PciNode *all_nodes = NULL;
@@ -283,10 +271,10 @@ int main(void) {
     
     while (1) {
         long long now = get_time_ms();
-        bool gui_needed = force_gui_update || (now - last_gui_update >= refresh_ms);
+        bool cycle_complete = (now - last_gui_update >= refresh_ms);
         bool tput_needed = (now - last_tput_update >= throughput_ms);
 
-        if (gui_needed) {
+        if (cycle_complete) {
             if (pacc) {
                 free_pci_tree(roots, all_nodes);
                 cleanup_pci_access(pacc);
@@ -296,9 +284,8 @@ int main(void) {
             total_devices = 0;
             for (struct pci_dev *dev = pacc->devices; dev; dev = dev->next) total_devices++;
             
-            // First throughput update for the new tree
+            // Gather final throughput for this cycle
             update_throughput(all_nodes, total_devices);
-            last_tput_update = now;
             
             build_render_list(roots, num_roots);
             
@@ -311,56 +298,63 @@ int main(void) {
             if (scroll_y < 0) scroll_y = 0;
             
             render_screen(scroll_y);
+            
+            // Mark end of cycle: next interval sum starts from now
+            mark_gui_cycle();
+            
             last_gui_update = now;
-            force_gui_update = false;
+            last_tput_update = now;
+            force_gui_render = false;
         } else if (tput_needed) {
             update_throughput(all_nodes, total_devices);
             last_tput_update = now;
-            // We don't re-build the render list here to save CPU, 
-            // but the RX/TX rates in all_nodes are updated.
-            // The user will see them on next GUI refresh.
-            // If the user wants to see them immediately, we should re-render.
-            // Let's re-render but not rebuild the tree.
-            build_render_list(roots, num_roots);
-            render_screen(scroll_y);
         }
 
-        timeout(throughput_ms / 2); // Poll more frequently than the smallest interval
+        if (force_gui_render) {
+            getmaxyx(stdscr, max_y, max_x);
+            if (selected_line < scroll_y) scroll_y = selected_line;
+            if (selected_line >= scroll_y + (max_y - 2)) scroll_y = selected_line - (max_y - 3);
+            render_screen(scroll_y);
+            force_gui_render = false;
+        }
+
+        timeout(throughput_ms / 2);
         int ch = getch();
         if (ch != ERR) {
             if (ch == 'q' || ch == 'Q') {
                 break;
             } else if (ch == KEY_UP) {
                 if (selected_line > 0) selected_line--;
-                force_gui_update = true;
+                force_gui_render = true;
             } else if (ch == KEY_DOWN) {
                 if (selected_line < num_lines - 1) selected_line++;
-                force_gui_update = true;
+                force_gui_render = true;
             } else if (ch == KEY_NPAGE) {
                 selected_line += (max_y - 2);
                 if (selected_line >= num_lines) selected_line = num_lines - 1;
-                force_gui_update = true;
+                force_gui_render = true;
             } else if (ch == KEY_PPAGE) {
                 selected_line -= (max_y - 2);
                 if (selected_line < 0) selected_line = 0;
-                force_gui_update = true;
+                force_gui_render = true;
             } else if (ch == 'h') {
                 if (num_lines > 0) {
                     toggle_hidden(render_lines[selected_line].dbdf_str);
-                    force_gui_update = true;
+                    // Tree structure changed, force a full rebuild cycle
+                    last_gui_update = 0; 
                 }
             } else if (ch == 'H') {
                 show_hidden_mode = !show_hidden_mode;
-                force_gui_update = true;
+                last_gui_update = 0;
             } else if (ch == 'r') {
                 reset_throughput();
-                force_gui_update = true;
+                force_gui_render = true;
             } else if (ch == '+' || ch == '=') {
                 if (throughput_ms < 1000) throughput_ms += 10;
-                force_gui_update = true;
+                force_gui_render = true;
             } else if (ch == '-' || ch == '_') {
                 if (throughput_ms > 10) throughput_ms -= 10;
-                force_gui_update = true;
+                force_gui_render = true;
             }
         }
     }
