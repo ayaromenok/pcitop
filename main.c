@@ -219,7 +219,7 @@ void build_render_list(PciNode **roots, int num_roots) {
 }
 
 void render_screen(int scroll_y) {
-    clear();
+    erase();
     
     attron(A_REVERSE);
     mvprintw(0, 0, "%-16s %-10s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s", 
