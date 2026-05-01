@@ -26,14 +26,22 @@ void load_settings(void) {
     if (!f) return;
     char line[64];
     bool in_hidden_section = false;
+    bool in_general_section = false;
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = 0;
         if (strcmp(line, "[hidden]") == 0) {
             in_hidden_section = true;
+            in_general_section = false;
+            continue;
+        }
+        if (strcmp(line, "[general]") == 0) {
+            in_general_section = true;
+            in_hidden_section = false;
             continue;
         }
         if (line[0] == '[') {
             in_hidden_section = false;
+            in_general_section = false;
             continue;
         }
         if (in_hidden_section && line[0] != '\0') {
@@ -43,6 +51,13 @@ void load_settings(void) {
                 strncpy(hidden_dbdfs[num_hidden++], line, 31);
             }
         }
+        if (in_general_section && line[0] != '\0') {
+            if (strncmp(line, "throughput_ms=", 14) == 0) {
+                throughput_ms = atoi(line + 14);
+                if (throughput_ms < 1) throughput_ms = 1;
+                if (throughput_ms > 5000) throughput_ms = 5000;
+            }
+        }
     }
     fclose(f);
 }
@@ -50,7 +65,9 @@ void load_settings(void) {
 void save_settings(void) {
     FILE *f = fopen(SETTINGS_FILE, "w");
     if (!f) return;
-    fprintf(f, "[hidden]\n");
+    fprintf(f, "[general]\n");
+    fprintf(f, "throughput_ms=%d\n", throughput_ms);
+    fprintf(f, "\n[hidden]\n");
     for (int i = 0; i < num_hidden; i++) {
         fprintf(f, "%s=1\n", hidden_dbdfs[i]);
     }
@@ -350,10 +367,16 @@ int main(void) {
                 reset_throughput();
                 force_gui_render = true;
             } else if (ch == '+' || ch == '=') {
-                if (throughput_ms < 1000) throughput_ms += 10;
+                if (throughput_ms < 5000) {
+                    throughput_ms += 1;
+                    save_settings();
+                }
                 force_gui_render = true;
             } else if (ch == '-' || ch == '_') {
-                if (throughput_ms > 10) throughput_ms -= 10;
+                if (throughput_ms > 1) {
+                    throughput_ms -= 1;
+                    save_settings();
+                }
                 force_gui_render = true;
             }
         }
