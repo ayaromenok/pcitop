@@ -1,0 +1,5 @@
+build/
+*.o
+pcitop
+test_pci
+*.ini
