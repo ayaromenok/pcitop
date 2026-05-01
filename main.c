@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 #define SETTINGS_FILE "pcitop.ini"
 #define MAX_HIDDEN_DEVICES 1024
@@ -12,6 +13,13 @@ int num_hidden = 0;
 bool show_hidden_mode = false;
 int selected_line = 0;
 int refresh_ms = 1000;
+int throughput_ms = 100;
+
+static long long get_time_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
 
 void load_settings(void) {
     FILE *f = fopen(SETTINGS_FILE, "r");
@@ -245,8 +253,8 @@ void render_screen(int scroll_y) {
     }
 
     // Status bar
-    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  +/-:interval (%dms)  q:quit  Mode: %s", 
-             refresh_ms, show_hidden_mode ? "Show All" : "Hide Hidden");
+    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  +/-:GUI (%dms)  Tput: %dms  q:quit", 
+             refresh_ms, throughput_ms);
     
     refresh();
 }
@@ -263,69 +271,104 @@ int main(void) {
     
     int scroll_y = 0;
     int max_y, max_x;
+    long long last_gui_update = 0;
+    long long last_tput_update = 0;
+    bool force_gui_update = true;
+
+    struct pci_access *pacc = NULL;
+    PciNode *all_nodes = NULL;
+    PciNode **roots = NULL;
+    int num_roots = 0;
+    int total_devices = 0;
     
     while (1) {
-        timeout(refresh_ms);
-        struct pci_access *pacc = init_pci_access();
-        
-        int num_roots = 0;
-        PciNode *all_nodes = NULL;
-        PciNode **roots = build_pci_tree(pacc, &num_roots, &all_nodes);
-        
-        int total_devices = 0;
-        for (struct pci_dev *dev = pacc->devices; dev; dev = dev->next) total_devices++;
-        
-        update_throughput(all_nodes, total_devices);
-        build_render_list(roots, num_roots);
-        
-        getmaxyx(stdscr, max_y, max_x);
-        
-        // Adjust selection if it went out of bounds (e.g. after hiding)
-        if (selected_line >= num_lines) selected_line = num_lines - 1;
-        if (selected_line < 0) selected_line = 0;
+        long long now = get_time_ms();
+        bool gui_needed = force_gui_update || (now - last_gui_update >= refresh_ms);
+        bool tput_needed = (now - last_tput_update >= throughput_ms);
 
-        // Auto-scroll to keep selection visible
-        if (selected_line < scroll_y) scroll_y = selected_line;
-        if (selected_line >= scroll_y + (max_y - 2)) scroll_y = selected_line - (max_y - 3);
-
-        if (scroll_y > num_lines - (max_y - 2)) {
-            scroll_y = num_lines - (max_y - 2);
-        }
-        if (scroll_y < 0) scroll_y = 0;
-        
-        render_screen(scroll_y);
-        
-        free_pci_tree(roots, all_nodes);
-        cleanup_pci_access(pacc);
-        
-        int ch = getch();
-        if (ch == 'q' || ch == 'Q') {
-            break;
-        } else if (ch == KEY_UP) {
-            if (selected_line > 0) selected_line--;
-        } else if (ch == KEY_DOWN) {
-            if (selected_line < num_lines - 1) selected_line++;
-        } else if (ch == KEY_NPAGE) {
-            selected_line += (max_y - 2);
-            if (selected_line >= num_lines) selected_line = num_lines - 1;
-        } else if (ch == KEY_PPAGE) {
-            selected_line -= (max_y - 2);
-            if (selected_line < 0) selected_line = 0;
-        } else if (ch == 'h') {
-            if (num_lines > 0) {
-                toggle_hidden(render_lines[selected_line].dbdf_str);
+        if (gui_needed) {
+            if (pacc) {
+                free_pci_tree(roots, all_nodes);
+                cleanup_pci_access(pacc);
             }
-        } else if (ch == 'H') {
-            show_hidden_mode = !show_hidden_mode;
-        } else if (ch == 'r') {
-            reset_throughput();
-        } else if (ch == '+' || ch == '=') {
-            if (refresh_ms < 5000) refresh_ms += 10;
-        } else if (ch == '-' || ch == '_') {
-            if (refresh_ms > 10) refresh_ms -= 10;
+            pacc = init_pci_access();
+            roots = build_pci_tree(pacc, &num_roots, &all_nodes);
+            total_devices = 0;
+            for (struct pci_dev *dev = pacc->devices; dev; dev = dev->next) total_devices++;
+            
+            // First throughput update for the new tree
+            update_throughput(all_nodes, total_devices);
+            last_tput_update = now;
+            
+            build_render_list(roots, num_roots);
+            
+            getmaxyx(stdscr, max_y, max_x);
+            if (selected_line >= num_lines) selected_line = num_lines - 1;
+            if (selected_line < 0) selected_line = 0;
+            if (selected_line < scroll_y) scroll_y = selected_line;
+            if (selected_line >= scroll_y + (max_y - 2)) scroll_y = selected_line - (max_y - 3);
+            if (scroll_y > num_lines - (max_y - 2)) scroll_y = num_lines - (max_y - 2);
+            if (scroll_y < 0) scroll_y = 0;
+            
+            render_screen(scroll_y);
+            last_gui_update = now;
+            force_gui_update = false;
+        } else if (tput_needed) {
+            update_throughput(all_nodes, total_devices);
+            last_tput_update = now;
+            // We don't re-build the render list here to save CPU, 
+            // but the RX/TX rates in all_nodes are updated.
+            // The user will see them on next GUI refresh.
+            // If the user wants to see them immediately, we should re-render.
+            // Let's re-render but not rebuild the tree.
+            build_render_list(roots, num_roots);
+            render_screen(scroll_y);
+        }
+
+        timeout(throughput_ms / 2); // Poll more frequently than the smallest interval
+        int ch = getch();
+        if (ch != ERR) {
+            if (ch == 'q' || ch == 'Q') {
+                break;
+            } else if (ch == KEY_UP) {
+                if (selected_line > 0) selected_line--;
+                force_gui_update = true;
+            } else if (ch == KEY_DOWN) {
+                if (selected_line < num_lines - 1) selected_line++;
+                force_gui_update = true;
+            } else if (ch == KEY_NPAGE) {
+                selected_line += (max_y - 2);
+                if (selected_line >= num_lines) selected_line = num_lines - 1;
+                force_gui_update = true;
+            } else if (ch == KEY_PPAGE) {
+                selected_line -= (max_y - 2);
+                if (selected_line < 0) selected_line = 0;
+                force_gui_update = true;
+            } else if (ch == 'h') {
+                if (num_lines > 0) {
+                    toggle_hidden(render_lines[selected_line].dbdf_str);
+                    force_gui_update = true;
+                }
+            } else if (ch == 'H') {
+                show_hidden_mode = !show_hidden_mode;
+                force_gui_update = true;
+            } else if (ch == 'r') {
+                reset_throughput();
+                force_gui_update = true;
+            } else if (ch == '+' || ch == '=') {
+                if (refresh_ms < 5000) refresh_ms += 100;
+                force_gui_update = true;
+            } else if (ch == '-' || ch == '_') {
+                if (refresh_ms > 100) refresh_ms -= 100;
+                force_gui_update = true;
+            }
         }
     }
     
+    if (pacc) {
+        free_pci_tree(roots, all_nodes);
+        cleanup_pci_access(pacc);
+    }
     endwin();
     if (render_lines) free(render_lines);
     
