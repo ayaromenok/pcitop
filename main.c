@@ -11,6 +11,7 @@ char hidden_dbdfs[MAX_HIDDEN_DEVICES][32];
 int num_hidden = 0;
 bool show_hidden_mode = false;
 int selected_line = 0;
+int refresh_ms = 100;
 
 void load_settings(void) {
     FILE *f = fopen(SETTINGS_FILE, "r");
@@ -244,8 +245,8 @@ void render_screen(int scroll_y) {
     }
 
     // Status bar
-    mvprintw(max_y - 1, 0, "Press 'h' to hide/show, 'H' to toggle hidden, 'r' to reset Sums, 'q' to quit. Mode: %s", 
-             show_hidden_mode ? "Show All" : "Hide Hidden");
+    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  +/-:interval (%dms)  q:quit  Mode: %s", 
+             refresh_ms, show_hidden_mode ? "Show All" : "Hide Hidden");
     
     refresh();
 }
@@ -259,12 +260,12 @@ int main(void) {
     noecho();
     keypad(stdscr, TRUE);
     curs_set(0);
-    timeout(1000); // 1-second refresh
     
     int scroll_y = 0;
     int max_y, max_x;
     
     while (1) {
+        timeout(refresh_ms);
         struct pci_access *pacc = init_pci_access();
         
         int num_roots = 0;
@@ -318,6 +319,10 @@ int main(void) {
             show_hidden_mode = !show_hidden_mode;
         } else if (ch == 'r') {
             reset_throughput();
+        } else if (ch == '+' || ch == '=') {
+            if (refresh_ms < 5000) refresh_ms += 10;
+        } else if (ch == '-' || ch == '_') {
+            if (refresh_ms > 10) refresh_ms -= 10;
         }
     }
     
