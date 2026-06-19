@@ -2,7 +2,7 @@
 
 **pcitop** is a relatively low-precision, real-time diagnostic utility for Linux that visualizes the PCIe device topology and monitors data throughput across the bus.
 
-![Main Interface](doc/pcitop.png)
+![Main Interface](doc/pcitop_20260619).png)
 
 ## Features
 
@@ -37,6 +37,7 @@
 | `H` | Toggle "Show All" vs "Hide Hidden" mode |
 | `r` | Reset throughput counters |
 | `+` / `-` | Increase/Decrease throughput sampling interval (1ms steps) |
+| `c` and cursor Left/Right | to select and hide/show columns |
 | `q` | Quit |
 
 ## Installation

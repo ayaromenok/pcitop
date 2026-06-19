@@ -5,4 +5,3 @@
 │   └── modules/     # Neural network modules
 
 - add ability to save log data with selected name with and without resent
-- hide/show some column
