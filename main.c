@@ -21,6 +21,29 @@ int num_logging_devices = 0;
 FILE *log_file = NULL;
 char session_ts[32] = "";
 
+typedef struct {
+    const char *name;
+    const char *ini_key;
+    int width;
+    bool visible;
+} Column;
+
+#define NUM_COLUMNS 10
+Column columns[NUM_COLUMNS] = {
+    {"Tree", "show_tree", 16, true},
+    {"B:D.F", "show_bdf", 15, true},
+    {"Vendor", "show_vendor", 10, true},
+    {"Device", "show_device", 25, true},
+    {"Max Speed", "show_max_speed", 15, true},
+    {"Cur Speed", "show_cur_speed", 12, true},
+    {"RX (Interval)", "show_rx_interval", 12, true},
+    {"TX (Interval)", "show_tx_interval", 12, true},
+    {"Sum RX", "show_sum_rx", 12, true},
+    {"Sum TX", "show_sum_tx", 12, true}
+};
+
+int selected_column = 0;
+
 static long long get_time_ms(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -34,28 +57,42 @@ void load_settings(void) {
     bool in_hidden_section = false;
     bool in_general_section = false;
     bool in_logging_section = false;
+    bool in_columns_section = false;
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = 0;
         if (strcmp(line, "[hidden]") == 0) {
             in_hidden_section = true;
             in_general_section = false;
+            in_logging_section = false;
+            in_columns_section = false;
             continue;
         }
         if (strcmp(line, "[general]") == 0) {
             in_general_section = true;
             in_hidden_section = false;
+            in_logging_section = false;
+            in_columns_section = false;
             continue;
         }
         if (strcmp(line, "[logging]") == 0) {
             in_logging_section = true;
             in_hidden_section = false;
             in_general_section = false;
+            in_columns_section = false;
+            continue;
+        }
+        if (strcmp(line, "[columns]") == 0) {
+            in_columns_section = true;
+            in_hidden_section = false;
+            in_general_section = false;
+            in_logging_section = false;
             continue;
         }
         if (line[0] == '[') {
             in_hidden_section = false;
             in_general_section = false;
             in_logging_section = false;
+            in_columns_section = false;
             continue;
         }
         if (in_hidden_section && line[0] != '\0') {
@@ -81,6 +118,19 @@ void load_settings(void) {
                 strncpy(logging_dbdfs[num_logging_devices++], line, 31);
             }
         }
+        if (in_columns_section && line[0] != '\0') {
+            char *eq = strchr(line, '=');
+            if (eq) {
+                *eq = '\0';
+                char *val_str = eq + 1;
+                for (int col = 0; col < NUM_COLUMNS; col++) {
+                    if (strcmp(columns[col].ini_key, line) == 0) {
+                        columns[col].visible = (atoi(val_str) == 1);
+                        break;
+                    }
+                }
+            }
+        }
     }
     fclose(f);
 }
@@ -98,6 +148,10 @@ void save_settings(void) {
     fprintf(f, "\n[logging]\n");
     for (int i = 0; i < num_logging_devices; i++) {
         fprintf(f, "%s=1\n", logging_dbdfs[i]);
+    }
+    fprintf(f, "\n[columns]\n");
+    for (int i = 0; i < NUM_COLUMNS; i++) {
+        fprintf(f, "%s=%d\n", columns[i].ini_key, columns[i].visible ? 1 : 0);
     }
     fclose(f);
 }
@@ -276,15 +330,41 @@ void build_render_list(PciNode **roots, int num_roots) {
 void render_screen(int scroll_y) {
     erase();
     
+    // Top bar: show columns selection
+    mvprintw(0, 0, "Columns: ");
+    for (int col = 0; col < NUM_COLUMNS; col++) {
+        bool is_sel = (col == selected_column);
+        if (is_sel) {
+            attron(COLOR_PAIR(1) | A_BOLD);
+        }
+        if (!columns[col].visible) {
+            attron(A_DIM);
+            printw("[%s]", columns[col].name);
+            attroff(A_DIM);
+        } else {
+            printw("%s", columns[col].name);
+        }
+        if (is_sel) {
+            attroff(COLOR_PAIR(1) | A_BOLD);
+        }
+        printw("  ");
+    }
+    
     attron(A_REVERSE);
-    mvprintw(0, 0, "%-16s %-15s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s", 
-             "Tree", "B:D.F", "Vendor", "Device", "Max Speed", "Cur Speed", "RX (Interval)", "TX (Interval)", "Sum RX", "Sum TX");
+    // Draw spaces to fill the whole header row
+    mvprintw(1, 0, "%-160s", ""); 
+    int x_pos = 0;
+    for (int col = 0; col < NUM_COLUMNS; col++) {
+        if (!columns[col].visible) continue;
+        mvprintw(1, x_pos, "%-*.*s", columns[col].width, columns[col].width, columns[col].name);
+        x_pos += columns[col].width + 1;
+    }
     attroff(A_REVERSE);
     
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
     
-    for (int i = 0; i < max_y - 2 && (i + scroll_y) < num_lines; i++) {
+    for (int i = 0; i < max_y - 3 && (i + scroll_y) < num_lines; i++) {
         int idx = i + scroll_y;
         RenderLine *l = &render_lines[idx];
         
@@ -307,9 +387,27 @@ void render_screen(int scroll_y) {
             strncpy(bdf_display, l->bdf_str, sizeof(bdf_display) - 1);
         }
 
-        mvprintw(i + 1, 0, "%-16s %-15s %-10s %-25s %-15s %-12s %-12s %-12s %-12s %-12s",
-                 l->tree_str, bdf_display, l->vendor_str, device_trunc, l->max_spd_str, l->cur_spd_str, 
-                 l->rx_rate_str, l->tx_rate_str, l->total_rx_str, l->total_tx_str);
+        int x = 0;
+        for (int col = 0; col < NUM_COLUMNS; col++) {
+            if (!columns[col].visible) continue;
+            
+            const char *val = "";
+            switch (col) {
+                case 0: val = l->tree_str; break;
+                case 1: val = bdf_display; break;
+                case 2: val = l->vendor_str; break;
+                case 3: val = device_trunc; break;
+                case 4: val = l->max_spd_str; break;
+                case 5: val = l->cur_spd_str; break;
+                case 6: val = l->rx_rate_str; break;
+                case 7: val = l->tx_rate_str; break;
+                case 8: val = l->total_rx_str; break;
+                case 9: val = l->total_tx_str; break;
+            }
+            
+            mvprintw(i + 2, x, "%-*.*s", columns[col].width, columns[col].width, val);
+            x += columns[col].width + 1;
+        }
         
         if (l->is_hidden_node) {
             attroff(A_DIM);
@@ -320,7 +418,7 @@ void render_screen(int scroll_y) {
     }
 
     // Status bar
-    mvprintw(max_y - 1, 0, "h:hide/show  H:toggle hidden  r:reset Sums  l:select  L:log [%s]  GUI:%dms  +/-:Tput(%dms)  q:quit", 
+    mvprintw(max_y - 1, 0, "h:hide dev  H:show hidden  c:toggle col  r:reset  l:select  L:log [%s]  GUI:%dms  +/-:Tput(%dms)  q:quit", 
              global_logging_enabled ? "ACTIVE" : "OFF", refresh_ms, throughput_ms);
 
     char version_str[64];
@@ -401,8 +499,8 @@ int main(void) {
             if (selected_line >= num_lines) selected_line = num_lines - 1;
             if (selected_line < 0) selected_line = 0;
             if (selected_line < scroll_y) scroll_y = selected_line;
-            if (selected_line >= scroll_y + (max_y - 2)) scroll_y = selected_line - (max_y - 3);
-            if (scroll_y > num_lines - (max_y - 2)) scroll_y = num_lines - (max_y - 2);
+            if (selected_line >= scroll_y + (max_y - 3)) scroll_y = selected_line - (max_y - 4);
+            if (scroll_y > num_lines - (max_y - 3)) scroll_y = num_lines - (max_y - 3);
             if (scroll_y < 0) scroll_y = 0;
             
             render_screen(scroll_y);
@@ -421,7 +519,7 @@ int main(void) {
         if (force_gui_render) {
             getmaxyx(stdscr, max_y, max_x);
             if (selected_line < scroll_y) scroll_y = selected_line;
-            if (selected_line >= scroll_y + (max_y - 2)) scroll_y = selected_line - (max_y - 3);
+            if (selected_line >= scroll_y + (max_y - 3)) scroll_y = selected_line - (max_y - 4);
             render_screen(scroll_y);
             force_gui_render = false;
         }
@@ -437,12 +535,26 @@ int main(void) {
             } else if (ch == KEY_DOWN) {
                 if (selected_line < num_lines - 1) selected_line++;
                 force_gui_render = true;
+            } else if (ch == KEY_LEFT) {
+                if (selected_column > 0) {
+                    selected_column--;
+                    force_gui_render = true;
+                }
+            } else if (ch == KEY_RIGHT) {
+                if (selected_column < NUM_COLUMNS - 1) {
+                    selected_column++;
+                    force_gui_render = true;
+                }
+            } else if (ch == 'c' || ch == 'C') {
+                columns[selected_column].visible = !columns[selected_column].visible;
+                save_settings();
+                force_gui_render = true;
             } else if (ch == KEY_NPAGE) {
-                selected_line += (max_y - 2);
+                selected_line += (max_y - 3);
                 if (selected_line >= num_lines) selected_line = num_lines - 1;
                 force_gui_render = true;
             } else if (ch == KEY_PPAGE) {
-                selected_line -= (max_y - 2);
+                selected_line -= (max_y - 3);
                 if (selected_line < 0) selected_line = 0;
                 force_gui_render = true;
             } else if (ch == 'h' || ch == ' ') {
