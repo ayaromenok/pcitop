@@ -2,7 +2,7 @@
 
 **pcitop** is a relatively low-precision, real-time diagnostic utility for Linux that visualizes the PCIe device topology and monitors data throughput across the bus.
 
-![Main Interface](doc/pcitop_20260619).png)
+![Main Interface](doc/pcitop_20260619.png)
 
 ## Features
 
